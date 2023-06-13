@@ -15,10 +15,10 @@ class CrawProperty:
         while True:
             try:
                 await self.run()
-                await asyncio.sleep(60 * 5)
+                await asyncio.sleep(60 * 30)
             except Exception as e:
                 print(e)
-                await asyncio.sleep(60 * 5)
+                await asyncio.sleep(60 * 30)
 
     async def run(self):
         print("run CrawProperty")
@@ -37,6 +37,8 @@ class CrawProperty:
 
             # send properties to telegram
             await self.send_properties(properties, monitor)
+
+            await asyncio.sleep(60)
 
     def get_properties(self, monitor):
         # get properties from rightmove
@@ -137,13 +139,13 @@ class CrawProperty:
             # send property to telegram
             await self.bot.send_message(
                 monitor["chat_id"], message)
-            await asyncio.sleep(2)
+            await asyncio.sleep(1)
             if "propertyImages" in property and "images" in property["propertyImages"] and len(property["propertyImages"]["images"]) > 0:
                 urls = [image["srcUrl"]
                         for image in property["propertyImages"]["images"]]
                 # limit 10 images only
-                if len(urls) > 10:
-                    urls = urls[:10]
+                if len(urls) > 6:
+                    urls = urls[:6]
                 media_group = [InputMediaPhoto(media=url) for url in urls]
                 await self.bot.send_media_group(monitor["chat_id"], media=media_group)
 
