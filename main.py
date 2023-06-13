@@ -1,5 +1,7 @@
 import logging
 import os
+import asyncio
+from craw import CrawProperty
 from pymongo import MongoClient
 
 from bson import ObjectId
@@ -63,9 +65,15 @@ async def monitor(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
     sm_id = get_random_string()
     keyboard = [
         [InlineKeyboardButton(
-            "Colindale", callback_data=f'location_1_{sm_id}')],
+            "Colindale", callback_data=f'location_Colindale_{sm_id}')],
         [InlineKeyboardButton(
-            "North Acton", callback_data=f'location_2_{sm_id}')],
+            "Acton Main Line", callback_data=f'location_ActonMainLine_{sm_id}')],
+        [InlineKeyboardButton(
+            "North Acton", callback_data=f'location_NorthActon_{sm_id}')],
+        [InlineKeyboardButton(
+            "White City", callback_data=f'location_WhiteCity_{sm_id}')],
+        [InlineKeyboardButton(
+            "Islington", callback_data=f'location_Islington_{sm_id}')],
         # Add as many locations as needed here
     ]
 
@@ -118,7 +126,7 @@ async def button(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
         # Now move on to the next question
         keyboard = [
             [InlineKeyboardButton(str(i), callback_data=f'max_price_{i}_{sm_id}') for i in range(
-                context.user_data['min_price'], 2500, 100)],
+                context.user_data['min_price'], 2601, 100)],
         ]
         reply_markup = InlineKeyboardMarkup(keyboard)
 
@@ -196,8 +204,9 @@ async def button(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
             'max_price': context.user_data['max_price']
         }
         db.monitors.insert_one(monitor)
+        # log last 4 digits of the id
         monitor_info = f"""Monitor created successfully:
-        ID: {monitor["_id"]}
+        ID: {str(monitor['_id'])[-4:]}
         Location: {context.user_data['location']}
         Min price: {context.user_data['min_price']}
         Max price: {context.user_data['max_price']}
@@ -216,7 +225,7 @@ async def remove_monitor(update: Update, context: ContextTypes.DEFAULT_TYPE) -> 
     chat_id = update.effective_chat.id
     monitors = db.monitors.find({'chat_id': chat_id})
     keyboard = [[InlineKeyboardButton(
-        f"Remove Monitor {monitor['_id']}", callback_data=f'remove_{str(monitor["_id"])}')] for monitor in monitors]
+        f"Remove Monitor {str(monitor['_id'])[-4:]}", callback_data=f'remove_{str(monitor["_id"])}')] for monitor in monitors]
     reply_markup = InlineKeyboardMarkup(keyboard)
     await context.bot.send_message(chat_id=update.effective_chat.id, text="Choose a monitor to remove:", reply_markup=reply_markup)
 
@@ -227,7 +236,7 @@ async def list_monitor(update: Update, context: ContextTypes.DEFAULT_TYPE) -> No
     monitors = db.monitors.find({'chat_id': chat_id})
 
     for monitor in monitors:
-        monitor_info = f"""Monitor ID: {monitor["_id"]}
+        monitor_info = f"""Monitor ID: {str(monitor['_id'])[-4:]}
         Location: {monitor['location']}
         Min price: {monitor['min_price']}
         Max price: {monitor['max_price']}
@@ -236,9 +245,10 @@ async def list_monitor(update: Update, context: ContextTypes.DEFAULT_TYPE) -> No
         await context.bot.send_message(chat_id=update.effective_chat.id, text=monitor_info)
 
 
-def main() -> None:
+async def main() -> None:
     """Start the bot."""
-    application = Application.builder().token(TOKEN).build()
+    application = Application.builder().token(
+        TOKEN).read_timeout(600).write_timeout(600).build()
 
     # on different commands - answer in Telegram
     application.add_handler(CommandHandler("start", start))
@@ -247,9 +257,15 @@ def main() -> None:
     application.add_handler(CommandHandler("removeMonitor", remove_monitor))
     application.add_handler(CommandHandler("listMonitor", list_monitor))
 
-    # Run the bot until the user presses Ctrl-C
-    application.run_polling()
+    # Run application and other_application() within the same event loop
+    async with application:
+        await application.initialize()  # inits bot, update, persistence
+        await application.start()
+        await application.updater.start_polling()
+        crawler = CrawProperty(db, application.bot)
+        await crawler.start()
 
 
 if __name__ == "__main__":
-    main()
+    loop = asyncio.get_event_loop()
+    loop.run_until_complete(main())
