@@ -4,6 +4,13 @@ from apscheduler.schedulers.background import BackgroundScheduler
 from telegram import InputMediaPhoto
 # Get the bot token from an environment variable
 
+populate_db = False
+
+if populate_db:
+    sleep_multiplier = 0.001
+else:
+    sleep_multiplier = 1
+
 
 class CrawProperty:
     def __init__(self, db, bot):
@@ -38,7 +45,7 @@ class CrawProperty:
             # send properties to telegram
             await self.send_properties(properties, monitor)
 
-            await asyncio.sleep(60)
+            await asyncio.sleep(sleep_multiplier * 60)
 
     def get_properties(self, monitor):
         # get properties from rightmove
@@ -117,6 +124,8 @@ class CrawProperty:
                 filtered_properties.append(property)
 
         # return only two properties
+        if populate_db:
+            return filtered_properties
         return filtered_properties[:2]
 
     async def send_properties(self, properties, monitor):
@@ -137,9 +146,10 @@ class CrawProperty:
             message += f"Url: https://www.rightmove.co.uk/properties/{property['id']}\n"
 
             # send property to telegram
-            await self.bot.send_message(
-                monitor["chat_id"], message)
-            await asyncio.sleep(1)
+            if populate_db == False:
+                await self.bot.send_message(
+                    monitor["chat_id"], message)
+            await asyncio.sleep(sleep_multiplier * 1)
             if "propertyImages" in property and "images" in property["propertyImages"] and len(property["propertyImages"]["images"]) > 0:
                 urls = [image["srcUrl"]
                         for image in property["propertyImages"]["images"]]
@@ -147,9 +157,10 @@ class CrawProperty:
                 if len(urls) > 6:
                     urls = urls[:6]
                 media_group = [InputMediaPhoto(media=url) for url in urls]
-                await self.bot.send_media_group(monitor["chat_id"], media=media_group)
+                if populate_db == False:
+                    await self.bot.send_media_group(monitor["chat_id"], media=media_group)
 
-            await asyncio.sleep(10)
+            await asyncio.sleep(sleep_multiplier * 10)
 
             if status == "new_property":
                 # save property to db
