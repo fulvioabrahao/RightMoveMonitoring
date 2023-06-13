@@ -1,14 +1,17 @@
-from telegram import Update, Bot
-from telegram.ext import Updater, CommandHandler, CallbackContext
 import logging
 import os
 from pymongo import MongoClient
+
+from telegram import Update, ForceReply
+from telegram.ext import Application, CommandHandler, ContextTypes, MessageHandler, filters
+from telegram import InlineKeyboardButton, InlineKeyboardMarkup, Update
+from telegram.ext import CallbackQueryHandler
+
 
 # Setup MongoDB
 MONGO_HOST = os.getenv('MONGO_HOST')
 client = MongoClient(MONGO_HOST)
 db = client.rightmove
-
 
 # Enable logging
 logging.basicConfig(format='%(asctime)s - %(name)s - %(levelname)s - %(message)s',
@@ -20,75 +23,133 @@ logger = logging.getLogger(__name__)
 TOKEN = os.getenv('TELEGRAM_TOKEN')
 
 
-def start(update: Update, context: CallbackContext) -> None:
+async def start(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
     """Send a message when the command /start is issued."""
-    update.message.reply_text('Hello! I am your Telegram bot.')
+    await update.message.reply_text('Hello! I am your Telegram bot.')
 
 
-def monitor(update: Update, context: CallbackContext) -> None:
+async def monitor(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
     """Handles the /monitor command."""
-    chat_id = update.effective_chat.id
-    try:
-        location, min_beds, max_beds, min_price, max_price = context.args
-        min_beds, max_beds, min_price, max_price = map(
-            int, [min_beds, max_beds, min_price, max_price])
+    keyboard = [
+        [InlineKeyboardButton("Colindale", callback_data='location_1')],
+        [InlineKeyboardButton("North Acton", callback_data='location_2')],
+        # Add as many locations as needed here
+    ]
 
+    reply_markup = InlineKeyboardMarkup(keyboard)
+
+    await update.message.reply_text('Please choose a location:', reply_markup=reply_markup)
+
+
+async def button(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
+    query = update.callback_query
+
+    # Check if the callback data is one of the locations
+    if query.data.startswith('location_') and 'location' not in context.user_data:
+        context.user_data['location'] = query.data.split('_')[1]
+        query.edit_message_text(
+            text=f"Selected location: {context.user_data['location']}")
+        # Now move on to the next question
+        keyboard = [
+            [InlineKeyboardButton(str(i), callback_data=f'min_price_{i}') for i in range(
+                1800, 2600, 100)],
+        ]
+        reply_markup = InlineKeyboardMarkup(keyboard)
+        await context.bot.send_message(chat_id=update.effective_chat.id, text="Choose a minimum price:", reply_markup=reply_markup)
+
+    elif query.data.startswith('min_price_') and 'min_price' not in context.user_data:
+        context.user_data['min_price'] = int(query.data.split('_')[2])
+        query.edit_message_text(
+            text=f"Selected minimum price: {context.user_data['min_price']}")
+        # Now move on to the next question
+        keyboard = [
+            [InlineKeyboardButton(str(i), callback_data=f'max_price_{i}') for i in range(
+                context.user_data['min_price'], 2500, 100)],
+        ]
+        reply_markup = InlineKeyboardMarkup(keyboard)
+        await context.bot.send_message(chat_id=update.effective_chat.id, text="Choose a maximum price:", reply_markup=reply_markup)
+
+    elif query.data.startswith('max_price_') and 'max_price' not in context.user_data:
+        context.user_data['max_price'] = int(query.data.split('_')[2])
+        query.edit_message_text(
+            text=f"Selected maximum price: {context.user_data['max_price']}")
+        # Now move on to the next question
+        keyboard = [
+            [InlineKeyboardButton(
+                str(i), callback_data=f'min_beds_{i}') for i in range(1, 5)],
+        ]
+        reply_markup = InlineKeyboardMarkup(keyboard)
+        await context.bot.send_message(chat_id=update.effective_chat.id, text="Choose a minimum number of beds:", reply_markup=reply_markup)
+
+    elif query.data.startswith('min_beds_') and 'min_beds' not in context.user_data:
+        context.user_data['min_beds'] = int(query.data.split('_')[2])
+        query.edit_message_text(
+            text=f"Selected minimum number of beds: {context.user_data['min_beds']}")
+        # Now move on to the next question
+        keyboard = [
+            [InlineKeyboardButton(str(i), callback_data=f'max_beds_{i}') for i in range(
+                context.user_data['min_beds'], 5)],
+        ]
+        reply_markup = InlineKeyboardMarkup(keyboard)
+        await context.bot.send_message(chat_id=update.effective_chat.id, text="Choose a maximum number of beds:", reply_markup=reply_markup)
+
+    elif query.data.startswith('max_beds_') and 'max_beds' not in context.user_data:
+        context.user_data['max_beds'] = int(query.data.split('_')[2])
+        query.edit_message_text(
+            text=f"Selected maximum number of beds: {context.user_data['max_beds']}")
+        # Now you have all the information needed to create a monitor in the database
+        chat_id = update.effective_chat.id
         monitor = {
             'chat_id': chat_id,
-            'location': location,
-            'min_beds': min_beds,
-            'max_beds': max_beds,
-            'min_price': min_price,
-            'max_price': max_price
+            'location': context.user_data['location'],
+            'min_beds': context.user_data['min_beds'],
+            'max_beds': context.user_data['max_beds'],
+            'min_price': context.user_data['min_price'],
+            'max_price': context.user_data['max_price']
         }
-
         db.monitors.insert_one(monitor)
+        monitor_info = f"""Monitor created successfully:
+        ID: {monitor["_id"]}
+        Location: {context.user_data['location']}
+        Min price: {context.user_data['min_price']}
+        Max price: {context.user_data['max_price']}
+        Min beds: {context.user_data['min_beds']}
+        Max beds: {context.user_data['max_beds']}"""
+        await context.bot.send_message(chat_id=update.effective_chat.id, text=monitor_info)
+        context.user_data.clear()  # Clear the data for the next operation
 
-        update.message.reply_text(
-            f'Monitor created successfully. ID: {monitor["_id"]}')
-    except (IndexError, ValueError):
-        logger.error('Error creating monitor: {}'.format(context.args))
-        update.message.reply_text(
-            'Usage: /monitor <location> <min beds> <max beds> <min price> <max price>')
 
-
-def fetch(update: Update, context: CallbackContext) -> None:
+async def fetch(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
     """Handles the /fetch command."""
     pass
 
 
-def remove_monitor(update: Update, context: CallbackContext) -> None:
+async def remove_monitor(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
     """Handles the /removeMonitor command."""
     pass
 
 
-def list_monitor(update: Update, context: CallbackContext) -> None:
+async def list_monitor(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
     """Handles the /listMonitor command."""
     pass
 
 
-def main():
+def main() -> None:
     """Start the bot."""
-    updater = Updater(token=TOKEN, use_context=True)
-
-    # Get the dispatcher to register handlers
-    dp = updater.dispatcher
+    application = Application.builder().token(TOKEN).build()
 
     # on different commands - answer in Telegram
-    dp.add_handler(CommandHandler("start", start))
-    dp.add_handler(CommandHandler("monitor", monitor))
-    dp.add_handler(CommandHandler("fetch", fetch))
-    dp.add_handler(CommandHandler("removeMonitor", remove_monitor))
-    dp.add_handler(CommandHandler("listMonitor", list_monitor))
+    application.add_handler(CommandHandler("start", start))
+    application.add_handler(CommandHandler("monitor", monitor))
+    # Add this handler to your Application in the main function
+    application.add_handler(CallbackQueryHandler(button))
+    application.add_handler(CommandHandler("fetch", fetch))
+    application.add_handler(CommandHandler("removeMonitor", remove_monitor))
+    application.add_handler(CommandHandler("listMonitor", list_monitor))
 
-    # Start the Bot
-    updater.start_polling()
-
-    # Run the bot until you press Ctrl-C or the process receives SIGINT,
-    # SIGTERM or SIGABRT. This should be used most of the time, since
-    # start_polling() is non-blocking and will stop the bot gracefully.
-    updater.idle()
+    # Run the bot until the user presses Ctrl-C
+    application.run_polling()
 
 
-if __name__ == '__main__':
+if __name__ == "__main__":
     main()
