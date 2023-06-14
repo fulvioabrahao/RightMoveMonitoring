@@ -43,9 +43,11 @@ class CrawProperty:
             properties = self.filter_properties(properties, monitor)
 
             # send properties to telegram
-            await self.send_properties(properties, monitor)
-
-            await asyncio.sleep(sleep_multiplier * 60)
+            if len(properties) > 0:
+                await self.send_properties(properties, monitor)
+                await asyncio.sleep(sleep_multiplier * 60)
+            else:
+                await asyncio.sleep(2)
 
     def get_properties(self, monitor):
         # get properties from rightmove
